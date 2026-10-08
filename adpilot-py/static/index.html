@@ -1,0 +1,195 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AdPilot</title><style>
+.live-status{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:6px 10px;
+    border-radius:99px;
+    background:rgba(47,212,154,.12);
+    border:1px solid var(--gd);
+    color:var(--gd);
+    font-size:11px;
+    font-weight:700;
+}
+
+.live-dot{
+    width:7px;
+    height:7px;
+    border-radius:50%;
+    background:var(--gd);
+    box-shadow:0 0 8px var(--gd);
+}
+
+.live-status.offline{
+    background:rgba(255,93,108,.12);
+    border-color:var(--bad);
+    color:var(--bad);
+}
+
+.live-status.offline .live-dot{
+    background:var(--bad);
+    box-shadow:0 0 8px var(--bad);
+}
+:root{--bg:#0b0e1a;--cd:rgba(255,255,255,.05);--bd:rgba(255,255,255,.1);--tx:#e8ebf7;--mu:#8e96b5;--ac:#7c6cff;--gd:#2fd49a;--bad:#ff5d6c;--wn:#f2b134}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 80% -10%,rgba(124,108,255,.2),transparent),var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif;padding:16px 24px 80px}
+h1{font-size:20px;margin:0}header{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}header h1{flex:1}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}button,select,input{font:inherit;color:var(--tx);background:var(--cd);border:1px solid var(--bd);border-radius:9px;padding:8px 12px;cursor:pointer}
+button.on,button.p{background:linear-gradient(135deg,var(--ac),#4f8cff);border:0;color:#fff;font-weight:600}
+.g{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}.cd{background:var(--cd);border:1px solid var(--bd);border-radius:14px;padding:14px;animation:in .4s both}
+@keyframes in{from{opacity:.0;transform:translateY(6px)}}.n{font-size:11px;color:var(--mu);margin-bottom:6px;text-transform:uppercase}.kv{font-size:22px;font-weight:700}
+.up{color:var(--gd)}.dn{color:var(--bad)}.mu{color:var(--mu)}.sm{font-size:12px}.tag{padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:var(--bd)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}.sc{overflow-x:auto}
+.ok{background:rgba(47,212,154,.12);border:1px solid var(--gd);padding:10px 14px;border-radius:12px;margin-bottom:12px}
+#md{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:16px}#md.on{display:flex}#md .cd{background:var(--bg);max-width:520px;max-height:85vh;overflow:auto}
+</style></head><body>
+<header>
+    <h1>◆ AdPilot — AI Decision Engine</h1>
+
+    <span id="liveStatus" class="live-status"
+    onclick="toggleLive()" style="cursor:pointer">
+        <span class="live-dot"></span> LIVE
+    </span>
+
+    <select id="sc" onchange="scen(this.value)"></select>
+    <button onclick="rst()">Reset</button>
+</header>
+<nav id="nav"></nav><div id="v"></div>
+<div id="md" onclick="if(event.target==this)this.classList.remove('on')"><div class="cd" id="mc"></div></div>
+<div style="position:fixed;right:16px;bottom:16px;display:flex;gap:6px"><input id="q" placeholder="Ask the AI…" onkeydown="if(event.key=='Enter')ask()"><button class="p" onclick="ask()">Ask</button></div>
+<script>
+const $=s=>document.querySelector(s),F=n=>(n<0?'-':'')+'₹'+Math.abs(Math.round(n)).toLocaleString('en-IN'),P=(x,d=0)=>(x*100).toFixed(d)+'%';
+const api=async(u,m='GET',b)=>{const r=await fetch('/api'+u,{method:m,headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});if(!r.ok)throw new Error((await r.json()).detail||r.status);return r.json()};
+const tab=['Decision Center','Overview','Budget Optimizer','Data Explorer','Decision History'];let cur=0,D,RC,OPT;
+$('#nav').innerHTML=tab.map((t,i)=>`<button id="t${i}" onclick="go(${i})">${t}</button>`).join('');
+api('/demo/scenarios').then(s=>{$('#sc').innerHTML='<option value="">▶ Demo Mode: pick scenario…</option>'+s.map((x,i)=>`<option value="${i}">${i+1}. ${x}</option>`).join('')});
+const tb = (h, r) => `
+<div class="sc">
+<table>
+<tr>${h.map(x => '<th>' + x).join('')}</tr>
+${r.map(x => '<tr>' + x.map(y => '<td>' + y).join('') + '</tr>').join('')}
+</table>
+</div>`;
+ async function go(i){
+    cur=i;
+
+    tab.forEach((_,k)=>
+        $('#t'+k).classList.toggle('on',k==i)
+    );
+
+    await refreshDashboard(true);
+}
+async function extra(i){return i==2?await api('/optimizer','POST',{}):i==3?{c:await api('/campaigns'),p:await api('/products')}:i==4?await api('/feedback'):null}
+let lastDashboard = null;
+let refreshing = false;
+
+async function refreshDashboard(force=false){
+
+    if(refreshing) return;
+
+    refreshing = true;
+
+    try{
+
+        const newDashboard = await api('/dashboard');
+
+        /*
+         * Only redraw the dashboard if the API data actually changed.
+         * This prevents unnecessary flashing.
+         */
+        const changed =
+            force ||
+            JSON.stringify(newDashboard) !== JSON.stringify(lastDashboard);
+
+        D = newDashboard;
+
+        if(changed){
+
+            const a = D.anomalies.find(x => x.cid && !x.good);
+
+            RC = a
+                ? await api(`/anomalies/${a.cid}/root-cause`)
+                : null;
+
+            const extraData = await extra(cur);
+
+            $('#v').innerHTML =
+                [center,over,optim,data,hist][cur](extraData);
+
+            lastDashboard = JSON.parse(JSON.stringify(newDashboard));
+        }
+
+        setLiveStatus(true);
+
+    }catch(error){
+
+        console.error("Live update failed:", error);
+        setLiveStatus(false);
+
+    }finally{
+
+        refreshing = false;
+    }
+}function setLiveStatus(online){
+
+    const status = $('#liveStatus');
+
+    if(online){
+        status.classList.remove('offline');
+        status.innerHTML =
+            '<span class="live-dot"></span> LIVE';
+    }else{
+        status.classList.add('offline');
+        status.innerHTML =
+            '<span class="live-dot"></span> OFFLINE';
+    }
+}
+const an=a=>`<div style="padding:5px 0"><span class=tag>${a.severity}</span> ${a.good?'<span class="tag up">Surge</span>':''} <b>${a.cid||''} ${a.name} — ${a.label}</b><div class="sm mu">${a.status}: ${a.previous.toFixed(2)} → ${a.current.toFixed(2)} (${(a.pct*100).toFixed(0)}%, z=${a.z.toFixed(1)}${a.iforest?', IsolationForest ✓':''})</div></div>`;
+function rec(r,i){return`<div style="margin-bottom:10px"><b>${r.kind=='shift'?'🚀':'📦'} ${r.title}</b><div class="sm mu">Confidence ${P(r.confidence)}</div><button onclick="why(${i})">Why?</button> <button class=p onclick="doit('${r.id}')">Approve &amp; Execute</button></div>`}
+function center(){const l=D.feedback,fb=D.fb;return(D.message?`<div class=ok>✅ ${D.message}<br><b>The system has completed one autonomous decision-learning cycle.</b></div>`:'')+
+`<div class=cd style="margin-bottom:14px">● ${D.monitoring} · ${D.pipeline.anomalies} anomalies · model confidence ${P(D.confidence)}</div><div class=g>
+<div class=cd><div class=n>1 · What happened?</div>${D.anomalies.length?an(D.anomalies.find(x=>x.cid&&!x.good)||D.anomalies[0]):'<span class=up>✓ Healthy</span>'}</div>
+<div class=cd><div class=n>2 · Why?</div>${RC?RC.slice(0,4).map((x,i)=>`<div class=sm>${i+1}. ${x.cause} <span class=tag>${x.impact}</span></div>`).join(''):'<span class=mu>—</span>'}</div>
+<div class=cd><div class=n>3 · What should we do?</div>${D.recommendations.map(rec).join('')||'<span class=mu>No action needed</span>'}</div>
+<div class=cd><div class=n>4 · What will happen?</div>${D.recommendations[0]?`<div class="kv up">${F(D.recommendations[0].expected_profit)}</div><div class=sm>profit/day · ${F(D.recommendations[0].expected_revenue)} revenue/day</div>`:'—'}</div>
+<div class=cd><div class=n>5 · Did it work?</div><span class=mu>See Decision History</span></div></div>
+<div class=cd style="margin-top:14px"><div class=n>Top opportunities</div>${tb(['Campaign','Score','Tier','ROAS 3d'],D.top_opportunities.map(o=>[o.cid+' '+o.name,o.score,o.tier,o.roas3.toFixed(2)]))}</div>`}
+function over(){const k=D.kpis,p=D.previous,d=(a,b)=>`<span class="sm ${a>=b?'up':'dn'}">${((a/b-1)*100).toFixed(1)}%</span>`;
+return`<div class=g>${[['Ad spend',F(k.spend),d(k.spend,p.spend)],['Revenue',F(k.revenue),d(k.revenue,p.revenue)],['Profit',F(k.profit),d(k.profit,p.profit)],['ROAS',k.roas.toFixed(2),d(k.roas,p.roas)],['Conversion',P(k.cvr,2),d(k.cvr,p.cvr)],['Inventory risk',D.inventory_risk+' SKU','']].map(x=>`<div class=cd><div class=n>${x[0]}</div><div class=kv>${x[1]}</div>${x[2]}</div>`).join('')}</div>
+<div class=g style="margin-top:14px"><div class=cd><div class=n>ROAS by platform</div>${tb(['Platform','ROAS'],Object.entries(D.roas_by_platform))}</div><div class=cd><div class=n>Profit by product (7d)</div>${tb(['Product','Profit'],Object.entries(D.profit_by_product).map(x=>[x[0],F(x[1])]))}</div><div class=cd><div class=n>Anomaly feed</div>${D.anomalies.map(an).join('')||'<span class=up>All normal</span>'}</div></div>`}
+function optim(){const o=OPT=arguments[0];return`<div class=cd style="margin-bottom:14px">Total budget ${F(o.total)} · expected profit ${F(o.profit_now)} → <b class=up>${F(o.profit_optimized)}</b> · held back ${F(o.held_back)}</div><div class=cd>${tb(['Campaign','Current','Recommended','Δ'],o.allocation.map(r=>[r.cid+' '+r.name,F(r.current),'<b>'+F(r.recommended)+'</b>',`<span class="${r.delta>=0?'up':'dn'}">${F(r.delta)}</span>`]))}</div>`}
+function data(x){return`<div class=cd><div class=n>Unified campaign dataset (7d)</div>${tb(['ID','Platform','SKU','Audience','Creative','Spend','Revenue','Profit','ROAS','CVR','Margin','Cover','Opp'],x.c.map(c=>[c.cid,c.platform,c.pid,c.audience,c.creative,F(c.spend),F(c.revenue),F(c.profit),c.roas.toFixed(2),P(c.cvr,2),P(c.margin),c.cover.toFixed(1)+'d',c.tier+' '+c.score]))}</div><div class=cd style="margin-top:14px"><div class=n>Products</div>${tb(['SKU','Product','Price','Margin','Stock','Cover','Risk'],x.p.map(p=>[p.sku,p.name,F(p.price),P(p.margin),Math.round(p.stock),p.cover_days.toFixed(1)+'d',p.stockout_risk]))}</div>`}
+function hist(f){return`<div class=cd style="margin-bottom:14px">Model confidence <b>${P(f.confidence)}</b> · platform boosts ${Object.entries(f.platform_boost).map(x=>x.join(' ')).join(' · ')}</div><div class=cd>${f.outcomes.length?tb(['#','Decision','ROAS','Profit','Expected Δ','Actual Δ','Result','Confidence'],f.outcomes.map(o=>[o.n,o.decision,o.before.roas.toFixed(2)+' → '+o.after.roas.toFixed(2),F(o.before.profit)+' → '+F(o.after.profit),F(o.expected_profit),F(o.actual_profit_delta),o.result,P(o.confidence_before)+' → '+P(o.confidence_after)])):'<span class=mu>No decisions yet.</span>'}</div>`}
+function why(i){const r=D.recommendations[i],w=r.why;$('#mc').innerHTML=`<b>${r.title}</b><p class=sm><b>Data used:</b> ${w.data_used.join(', ')}</p><p class=sm><b>Key metrics:</b> ${Object.entries(w.key_metrics).map(([k,v])=>k+': '+(+v).toFixed(2)).join(' · ')}</p><p class="sm up">✓ ${w.positives.join('<br>✓ ')||'—'}</p><p class="sm dn">⚠ ${w.risks.join('<br>⚠ ')}</p><p class=sm><b>Constraints:</b> ${w.constraints.join(' · ')}</p><p><b>Expected:</b> ${F(r.expected_revenue)} revenue / ${F(r.expected_profit)} profit per day<br><b>Confidence ${P(r.confidence)}</b></p><button onclick="$('#md').classList.remove('on')">Close</button>`;$('#md').classList.add('on')}
+async function doit(id){try{await api(`/recommendations/${id}/approve`,'POST');await api(`/recommendations/${id}/execute`,'POST');go(0)}catch(e){alert(e.message)}}
+async function scen(v){if(v==='')return;await api('/demo/scenario','POST',{scenario:+v});$('#sc').value='';go(0)}
+async function rst(){await api('/demo/reset','POST');go(cur)}
+async function ask(){const q=$('#q').value.trim();if(!q)return;const r=await api('/assistant','POST',{question:q});$('#q').value='';alert(r.answer)}
+let liveUpdates = true;
+
+function toggleLive() {
+    liveUpdates = !liveUpdates;
+
+    const status = $('#liveStatus');
+
+    if (liveUpdates) {
+        status.classList.remove('offline');
+        status.innerHTML = '<span class="live-dot"></span> LIVE';
+
+        refreshDashboard(false);
+    } else {
+        status.classList.add('offline');
+        status.innerHTML = '<span class="live-dot"></span> PAUSED';
+    }
+}
+
+setInterval(() => {
+    if (liveUpdates) {
+        refreshDashboard(false);
+    }
+}, 2000);
+go(0);
+</script>
+
+</body>
+</html>
